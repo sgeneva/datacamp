@@ -10,7 +10,7 @@ from quantopian.pipeline.filters.morningstar import Q500US
 import numpy as np
 from scipy import stats
 
-
+#Slopeeeeing
 def _slope(ts):
     x = np.arange(len(ts))
     slope, intercept, r_value, p_value, std_err = stats.linregress(x, ts)
