@@ -1,0 +1,76 @@
+"""
+This is a simple demo model using equity momentum.
+"""
+from quantopian.algorithm import attach_pipeline, pipeline_output
+from quantopian.pipeline import Pipeline
+from quantopian.pipeline.data.builtin import USEquityPricing
+from quantopian.pipeline.factors import AverageDollarVolume
+from quantopian.pipeline.filters.morningstar import Q500US
+
+import numpy as np
+from scipy import stats
+
+
+def _slope(ts):
+    x = np.arange(len(ts))
+    slope, intercept, r_value, p_value, std_err = stats.linregress(x, ts)
+    annualized_slope = (np.power(np.exp(slope), 250) -1) *100
+    return annualized_slope * (r_value ** 2)  
+
+def initialize(context):
+    """
+    Called once at the start of the algorithm.
+    """   
+    # Setting global parameters
+    context.momentum_window = 90
+    context.minimum_momentum = 30
+    context.number_of_stocks = 30
+    # --------------------------
+    
+    # Rebalance monthly
+    schedule_function(my_rebalance, date_rules.month_start(), time_rules.market_open(hours=1))
+     
+    # Create our dynamic stock selector.
+    attach_pipeline(make_pipeline(), 'us_500')
+         
+def make_pipeline():
+    """
+    This will return the top 500 US stocks by market cap, dynically updated.
+    """
+    # Base universe set to the Q500US
+    base_universe = Q500US()
+    yesterday_close = USEquityPricing.close.latest
+     
+    pipe = Pipeline(
+        screen = base_universe,
+        columns = {
+            'close': yesterday_close,
+        }
+    )
+    return pipe 
+ 
+def my_rebalance(context,data):
+    """
+    Our monthly rebalancing
+    """
+    context.output = pipeline_output('us_500') # update the current top 500 us stocks
+    context.security_list = context.output.index
+    
+    momentum_list = np.log(data.history(context.security_list, "close", context.momentum_window, "1d")).apply(_slope)
+    
+    ranking_table = momentum_list.sort_values(ascending=False) # Sorted
+    
+    buy_list = ranking_table[:context.number_of_stocks] # These we want to buy
+    
+    # Let's trade!
+    for security in context.portfolio.positions:
+        if security not in buy_list:
+            order_target(security, 0) # If a stock in the portfolio is not in buy list, sell it!
+  
+    for security in context.security_list:
+        if security in buy_list:
+            if buy_list[security] < context.minimum_momentum:
+                weight = 0.0
+            else:
+                weight = 1.0 / context.number_of_stocks # Equal size to keep simple
+            order_target_percent(security, weight) # Trade!
